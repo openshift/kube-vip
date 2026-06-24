@@ -19,6 +19,13 @@ REPOSITORY ?= docker.io/plndr
 GO_VERSION := 1.25.6
 K8S_VERSION ?= v1.35.0
 
+# Module mode for the test targets. Some CI builder images (e.g. the OpenShift
+# ART golang builder) export GOFLAGS=-mod=vendor, which breaks `go test` in this
+# non-vendored repository. Override it on the test recipes so the tests resolve
+# modules from the cache instead of a non-existent vendor/ directory.
+# Use override so an inherited GOFLAGS from the environment cannot win.
+override TEST_GOFLAGS := -mod=mod
+
 .PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
 
 all: check install
@@ -129,13 +136,13 @@ manifest-test:
 	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster
 
 unit-tests:
-	go test -race ./...
+	GOFLAGS="$(TEST_GOFLAGS)" go test -race ./...
 
 unit-tests-docker:
 	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) make unit-tests
 
 integration-tests:
-	go test -tags=integration,e2e -v ./pkg/etcd
+	GOFLAGS="$(TEST_GOFLAGS)" go test -tags=integration,e2e -v ./pkg/etcd
 
 e2e-tests-arp: get-whoami
 	GOMAXPROCS=4 TEST_MODE=arp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
