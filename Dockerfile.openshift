@@ -1,0 +1,14 @@
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-5.0 AS builder
+WORKDIR /go/src/github.com/openshift/kube-vip
+COPY . .
+RUN CGO_ENABLED=0 GO111MODULE=on GOFLAGS=-mod=mod make build
+
+FROM registry.ci.openshift.org/ocp/5.0:base-rhel9
+
+COPY --from=builder /go/src/github.com/openshift/kube-vip/kube-vip /usr/bin/
+
+ENTRYPOINT ["/usr/bin/kube-vip"]
+
+LABEL io.k8s.display-name="kube-vip" \
+      io.k8s.description="Kubernetes Control Plane Virtual IP and Load-Balancer" \
+      org.opencontainers.image.authors="Mateusz Kowalski <mko@redhat.com>"
