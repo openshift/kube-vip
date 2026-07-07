@@ -53,9 +53,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 		})
 
 		BeforeAll(func() {
-			var err error
-			tempDirPathRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-arp-ds", testDirPrefix))
-			Expect(err).NotTo(HaveOccurred())
+			tempDirPathRoot = MustMkdirTemp("", fmt.Sprintf("%s-arp-ds", testDirPrefix))
 		})
 
 		AfterAll(func() {
@@ -77,9 +75,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					IPFamily: kindconfigv1alpha4.IPv4Family,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv4-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
@@ -98,15 +94,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv4 addresses on exit when only control plane is enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "false",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "false",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -114,15 +111,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv4 addresses on exit when only services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -130,15 +128,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv4 addresses on exit when only services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -146,15 +145,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv4 addresses on exit when control-plane and services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -162,15 +162,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv4 addresses on exit when control plane and services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv4Family, clusterName)
@@ -178,15 +179,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" is able to pick up leaderelection when all endpoints for the service were deleted", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testEndpoints(ctx, manifestValues, client, utils.IPv4Family, clusterName, corev1.ServiceExternalTrafficPolicyLocal)
@@ -205,9 +207,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					IPFamily: kindconfigv1alpha4.IPv6Family,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipv6-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
@@ -226,15 +226,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv6 addresses on exit when only control plane is enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "false",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "false",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
@@ -242,15 +243,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv6 addresses on exit when only services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
@@ -258,15 +260,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv6 addresses on exit when only services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
@@ -274,15 +277,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv6 addresses on exit when control-plane and services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
@@ -290,15 +294,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all IPv6 addresses on exit when control plane and services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.IPv6Family, clusterName)
@@ -306,15 +311,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" is able to pick up leaderelection when all endpoints for the service were deleted", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testEndpoints(ctx, manifestValues, client, utils.IPv6Family, clusterName, corev1.ServiceExternalTrafficPolicyLocal)
@@ -333,9 +339,7 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 					IPFamily: kindconfigv1alpha4.DualStackFamily,
 				}
 
-				var err error
-				tempDirPath, err = os.MkdirTemp(tempDirPathRoot, testDirPrefix)
-				Expect(err).NotTo(HaveOccurred())
+				tempDirPath = MustMkdirTemp(tempDirPathRoot, testDirPrefix)
 
 				clusterName, client, _ = prepareClusterForDS(tempDirPath, "ipdual-ds", imagePath, k8sImagePath,
 					logger, networking, 1, nil)
@@ -354,15 +358,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all addresses on exit when only control plane is enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "false",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "false",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
@@ -370,15 +375,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all addresses on exit when only services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
@@ -386,15 +392,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all addresses on exit when only services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
@@ -402,15 +409,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all addresses on exit when control-plane and services are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "false",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "false",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
@@ -418,15 +426,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" deletes all addresses on exit when control plane and services with per-service leaderelection are enabled", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "true",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "true",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testDS(ctx, manifestValues, client, utils.DualFamily, clusterName)
@@ -434,15 +443,16 @@ var _ = Describe("kube-vip ARP/NDP broadcast neighbor when deployed as a regular
 
 			It(clusterName+" is able to pick up leaderelection when all endpoints for the service were deleted", func() {
 				manifestValues := &e2e.KubevipManifestValues{
-					Mode:               Mode,
-					ControlPlaneEnable: "false",
-					VipElectionEnable:  "true",
-					ImagePath:          imagePath,
-					ConfigPath:         configPath,
-					SvcEnable:          "true",
-					SvcElectionEnable:  "true",
-					EnableEndpoints:    "false",
-					EnableNodeLabeling: "false",
+					Mode:                  Mode,
+					ControlPlaneEnable:    "false",
+					VipElectionEnable:     "true",
+					ImagePath:             imagePath,
+					ConfigPath:            configPath,
+					SvcEnable:             "true",
+					SvcElectionEnable:     "true",
+					EnableEndpoints:       "false",
+					EnableNodeLabeling:    "false",
+					EnableServiceSecurity: "true",
 				}
 
 				testEndpoints(ctx, manifestValues, client, utils.DualFamily, clusterName, corev1.ServiceExternalTrafficPolicyLocal)
@@ -561,9 +571,17 @@ func testDS(ctx context.Context, manifestValues *e2e.KubevipManifestValues, clie
 		}
 	}
 
-	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
-	Expect(err).ToNot(HaveOccurred())
-	Expect(len(pods.Items)).To(Equal(1))
+	var pods *corev1.PodList
+	Eventually(func() error {
+		pods, err = client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{LabelSelector: "app=kube-vip"})
+		if err != nil {
+			return err
+		}
+		if len(pods.Items) != 1 {
+			return fmt.Errorf("expected 1 pod, but got %d", len(pods.Items))
+		}
+		return nil
+	}, "40s").Should(Succeed())
 
 	removeKubeVipDS(ctx, client)
 
@@ -795,6 +813,10 @@ func createKubeVipDS(ctx context.Context, name, namespace string, manifestValues
 								{
 									Name:  "enable_endpoints",
 									Value: manifestValues.EnableEndpoints,
+								},
+								{
+									Name:  "enable_service_security",
+									Value: "true",
 								},
 							},
 							SecurityContext: &corev1.SecurityContext{

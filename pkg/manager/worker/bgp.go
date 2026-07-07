@@ -45,7 +45,7 @@ func NewBGP(arpMgr *arp.Manager, intfMgr *networkinterface.Manager,
 func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 	var err error
 	if b.bgpServer == nil {
-		b.bgpServer, err = bgp.NewBGPServer(b.config.BGPConfig)
+		b.bgpServer, err = bgp.NewBGPServer(b.config.BGPConfig, log.Level(b.config.Logging))
 		if err != nil {
 			return fmt.Errorf("creating BGP server: %w", err)
 		}
@@ -59,7 +59,7 @@ func (b *BGP) Configure(ctx context.Context, _ *sync.WaitGroup) error {
 
 		for stateName, stateValue := range api.PeerState_SessionState_value {
 			metricValue := 0.0
-			if int(p.Peer.State.SessionState) == int(stateValue) {
+			if int(p.Peer.State.SessionState) == int(stateValue)-1 {
 
 				metricValue = 1
 			}

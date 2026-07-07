@@ -42,9 +42,7 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 		server = sharedBGPServer
 		Expect(server).ToNot(BeNil(), "SharedBGPServer not initialized")
 
-		var err error
-		tempDirRoot, err = os.MkdirTemp("", fmt.Sprintf("%s-bgp-hc", testDirPrefix))
-		Expect(err).NotTo(HaveOccurred())
+		tempDirRoot = MustMkdirTemp("", fmt.Sprintf("%s-bgp-hc", testDirPrefix))
 
 		cpVIP = e2e.GenerateVIP(utils.IPv4Family, SOffset.Get(), defaultNetwork)
 		kvPeers := []*e2e.BGPPeerValues{
@@ -68,6 +66,7 @@ var _ = Describe("kube-vip BGP ControlPlane health-check", Ordered, func() {
 				ControlPlaneHealthCheckTimeoutSeconds:   1,
 				ControlPlaneHealthCheckFailureThreshold: 3,
 				ControlPlaneHealthCheckCAPath:           "/etc/kubernetes/pki/ca.crt",
+				EnableServiceSecurity:                   "true",
 			},
 		})
 

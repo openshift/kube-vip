@@ -58,6 +58,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		}
 
 		if err := network.SetMask(c.VIPSubnet); err != nil {
+			killFunc()
 			return fmt.Errorf("failed to set mask for subnet %q: %w", c.VIPSubnet, err)
 		}
 
@@ -73,7 +74,7 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		if !c.EnableRoutingTable {
 			// Normal VIP addition, use skipDAD=false for normal DAD process
 			if _, err = network.AddIP(false, false); err != nil {
-				return fmt.Errorf("failed to add IP address %s: %w", network.IP(), err)
+				log.Error("failed to add IP", "address", network.IP(), "error", err)
 			}
 		}
 
@@ -94,10 +95,11 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 		}
 
 		if c.EnableLoadBalancer {
-			lb, err := loadbalancer.NewIPVSLB(ctx, network.IP(), c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
-				c.BackendHealthCheckInterval, killFunc, &wg)
+			lb, err := loadbalancer.NewIPVSLB(ctx, network, c.LoadBalancerPort, c.LoadBalancerForwardingMethod,
+				c.BackendHealthCheckInterval, c.EgressWithNftables, killFunc, &wg)
 			if err != nil {
-				return fmt.Errorf("creating IPVS LoadBalance: %w", err)
+				killFunc()
+				return fmt.Errorf("creating IPVS LoadBalancer: %w", err)
 			}
 
 			wg.Go(func() {
@@ -184,7 +186,24 @@ func (cluster *Cluster) StartVipService(ctx context.Context, c *kubevip.Config, 
 
 				for entry := range *backendMap {
 					log.Debug("entry.Check() for entry", "entry", entry)
-					if entry.Check() {
+					var healthy bool
+					if c.ControlPlaneHealthCheck.Address != "" {
+						req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, c.ControlPlaneHealthCheck.Address, nil)
+						if reqErr != nil {
+							log.Error("create health check request", "err", reqErr)
+						} else if resp, doErr := cluster.healthCheckHTTPClient.Do(req); doErr != nil {
+							log.Error("health check request failed", "url", c.ControlPlaneHealthCheck.Address, "err", doErr)
+						} else {
+							resp.Body.Close()
+							healthy = resp.StatusCode == http.StatusOK
+							if !healthy {
+								log.Warn("health check returned non-200 status", "url", c.ControlPlaneHealthCheck.Address, "status", resp.StatusCode)
+							}
+						}
+					} else {
+						healthy = entry.Check()
+					}
+					if healthy {
 						log.Debug("entry.Check() true")
 						// Normal VIP addition with precheck, use skipDAD=false for normal DAD process
 						_, err = network.AddIP(true, false)
@@ -422,7 +441,11 @@ func (cluster *Cluster) StartLoadBalancerService(ctx context.Context, c *kubevip
 			}
 		}
 
-		<-cluster.stop
+		select {
+		case <-cluster.stop:
+		case <-ctx.Done():
+		}
+
 		// Stop the loadbalancer context if it is running
 		lbCancel()
 
