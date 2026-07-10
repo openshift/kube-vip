@@ -48,6 +48,7 @@ const (
 type Network interface {
 	AddIP(precheck bool, skipDAD bool, minLifetime ...int) (bool, error)
 	AddRoute(precheck bool) (bool, error)
+	ReplaceRoute() error
 	DeleteIP() (bool, error)
 	DeleteRoute() error
 	UpdateRoutes() (bool, error)
@@ -358,6 +359,13 @@ func (configurator *network) routeExists(route *netlink.Route) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// ReplaceRoute - Idempotently (re-)assert the route in the route table
+func (configurator *network) ReplaceRoute() error {
+	configurator.link.Lock.Lock()
+	defer configurator.link.Lock.Unlock()
+	return netlink.RouteReplace(configurator.PrepareRoute())
 }
 
 // DeleteRoute - Delete an IP address from a route table
