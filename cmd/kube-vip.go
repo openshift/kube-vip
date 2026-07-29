@@ -60,6 +60,7 @@ func init() {
 	// Basic flags
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.Interface, "interface", "", "Name of the interface to bind to")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ServicesInterface, "serviceInterface", "", "Name of the interface to bind to (for services)")
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.AllowInterfaceNotUp, "allowInterfaceNotUp", false, "Allow kube-vip to start even if the interface is not up")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIP, "vip", "", "The Virtual IP address")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.VIPSubnet, "vipSubnet", "", "The Virtual IP address subnet e.g. /32 /24 /8 etc.. (Default to 32 for IPv4 and 128 for IPv6)")
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.NodeName, "nodeName", "", "Name to be used for lease holder. Must be unique for each node/instance")
@@ -167,8 +168,11 @@ func init() {
 
 	// Configuration file flag
 	kubeVipCmd.PersistentFlags().StringVar(&initConfig.ConfigFile, "config-file", "", "Path to a JSON/YAML configuration file to load settings from")
+	kubeVipCmd.PersistentFlags().StringVar(&initConfig.InstanceName, "instanceName", "", "Unique name for this kube-vip instance (currently used to isolate nftables egress tables)")
 
 	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.EgressWithNftables, "egressWithNftables", true, "Use nftables-based egress implementation")
+
+	kubeVipCmd.PersistentFlags().BoolVar(&initConfig.PerServiceElectionOnDemand, "perServiceElectionOnDemand", false, "Allow kube-vip to use per-service election for annotated services")
 
 	kubeVipCmd.AddCommand(kubeKubeadm)
 	kubeVipCmd.AddCommand(kubeManifest)
@@ -358,21 +362,38 @@ var kubeVipManager = &cobra.Command{
 		}
 
 		// Determine the kube-vip mode
-		var mode string
+		var (
+			mode         string
+			modesEnabled int
+		)
 		if initConfig.EnableARP {
 			mode = "ARP"
+			modesEnabled++
 		}
 
 		if initConfig.EnableBGP {
 			mode = "BGP"
+			modesEnabled++
 		}
 
 		if initConfig.EnableWireguard {
 			mode = "Wireguard"
+			modesEnabled++
 		}
 
 		if initConfig.EnableRoutingTable {
 			mode = "Routing Table"
+			modesEnabled++
+		}
+
+		if mode == "" {
+			log.Error("no valid kube-vip mode detected, ensure a supported mode is configured")
+			return
+		}
+
+		if modesEnabled > 1 {
+			log.Error("multiple kube-vip modes detected, ensure only one mode is configured")
+			return
 		}
 
 		// Provide configuration to output/logging

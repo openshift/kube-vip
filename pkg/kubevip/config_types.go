@@ -91,6 +91,9 @@ type Config struct {
 	// Namespace will define which namespace the control plane pods will run in
 	Namespace string `yaml:"namespace"`
 
+	// InstanceName identifies this kube-vip deployment when naming host-global resources.
+	InstanceName string `yaml:"instanceName"`
+
 	// Namespace will define which namespace the control plane pods will run in
 	ServiceNamespace string `yaml:"serviceNamespace"`
 
@@ -111,6 +114,9 @@ type Config struct {
 
 	// ServicesInterface is the network interface to bind to for services (optional)
 	ServicesInterface string `yaml:"servicesInterface,omitempty"`
+
+	// AllowInterfaceNotUp allows kube-vip to start even when the interface is not up
+	AllowInterfaceNotUp bool `yaml:"allowInterfaceNotUp,omitempty"`
 
 	// EnableLoadBalancer, provides the flexibility to make the load-balancer optional
 	EnableLoadBalancer bool `yaml:"enableLoadBalancer"`
@@ -215,6 +221,9 @@ type Config struct {
 
 	// DebounceTime defines how long will event debouncer wait for the events to arrive
 	DebounceTime string `yaml:"debounceTime"`
+
+	// PerServiceElectionOnDemand will enable kube-vip to handle services with per-service election when annotation is used
+	PerServiceElectionOnDemand bool `yaml:"perServiceElectionOnDemand"`
 }
 
 // KubernetesLeaderElection defines all of the settings for Kubernetes KubernetesLeaderElection

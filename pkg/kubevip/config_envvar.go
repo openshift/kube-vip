@@ -33,6 +33,9 @@ const (
 	// vipLogLevel - defines the level of logging to produce (5 being the most verbose)
 	vipLogLevel = "vip_loglevel"
 
+	// instanceName identifies this kube-vip deployment when naming host-global resources
+	instanceName = "instance_name"
+
 	// vipInterface - defines the interface that the vip should bind too
 	vipInterface = "vip_interface"
 
@@ -48,6 +51,9 @@ const (
 	// vipServicesInterface - defines the interface that the service vips should bind too
 	vipServicesInterface = "vip_servicesinterface"
 
+	// vipAllowInterfaceNotUp - defines if kube-vip should tolerate a down interface
+	vipAllowInterfaceNotUp = "vip_allow_interface_not_up"
+
 	// vipSubnet - defines the subnet that the vip will use
 	vipSubnet = "vip_subnet"
 
@@ -59,6 +65,9 @@ const (
 
 	// egressWithNftables - enables using nftables over iptables
 	egressWithNftables = "egress_withnftables"
+
+	// perServiceElectionOnDemand - enables kube-vip to use per-service election for annotated services
+	perServiceElectionOnDemand = "per_service_election_on_demand"
 
 	/////////////////////////////////////
 	// TO DO:
