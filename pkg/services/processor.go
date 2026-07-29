@@ -91,7 +91,7 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, wg *sync.WaitGroup) error {
+func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool, wg *sync.WaitGroup) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
@@ -99,6 +99,11 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 
 	timer := prometheus.NewTimer(metrics.ServiceReconcileDuration.WithLabelValues(svc.Namespace))
 	defer timer.ObserveDuration()
+
+	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" ||
+		!forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] == "true" {
+		return nil
+	}
 
 	// We only care about LoadBalancer services
 	if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
@@ -114,6 +119,15 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	// Check the loadBalancer class
 	if p.lbClassFilter(svc, p.config) {
 		return nil
+	}
+
+	// The Service annotation is cluster-wide while nftables state is local to
+	// each node. Reconcile stale per-Service chains on every node after a table
+	// migration, even when this kube-vip pod is not the Service leader.
+	if svc.Annotations[kubevip.EgressNftablesTable] != "" {
+		if err := p.cleanupStaleEgressNftablesChains(svc); err != nil {
+			log.Warn("failed to clean stale nftables egress chains", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+		}
 	}
 
 	svcAddresses, svcHostnames := instance.FetchServiceAddresses(svc)
@@ -275,10 +289,15 @@ func (p *Processor) waitForAddress(ctx context.Context, svc *v1.Service) (*v1.Se
 	}
 }
 
-func (p *Processor) Delete(event watch.Event) error {
+func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
 		return fmt.Errorf("(svcs) unable to parse Kubernetes services from API watcher")
+	}
+
+	if forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] != "true" ||
+		!forcedOnly && svc.Annotations[kubevip.ForcePerServiceElection] == "true" {
+		return nil
 	}
 
 	svcCtx, err := p.getServiceContext(svc.UID)
