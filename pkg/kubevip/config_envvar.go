@@ -69,6 +69,8 @@ const (
 	// perServiceElectionOnDemand - enables kube-vip to use per-service election for annotated services
 	perServiceElectionOnDemand = "per_service_election_on_demand"
 
+	// egressEnableInternalSNAT - enables the internal SNAT rule that kube-vip adds to the egress chain
+	egressEnableInternalSNAT = "egress_enableinternalsnat"
 	/////////////////////////////////////
 	// TO DO:
 	// Determine how to tidy this mess up
@@ -103,6 +105,8 @@ const (
 
 	// bgpEnable defines if BGP should be enabled
 	bgpEnable = "bgp_enable"
+	// bgpAttachIPToInterface defines if BGP service VIPs should be assigned to the configured interface
+	bgpAttachIPToInterface = "bgp_attach_ip_to_interface"
 	// bgpRouterID defines the routerID for the BGP server
 	bgpRouterID = "bgp_routerid"
 	// bgpRouterInterface defines the interface that we can find the address for

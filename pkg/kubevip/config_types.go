@@ -11,6 +11,9 @@ type Config struct {
 	// EnableBGP, will use BGP to advertise the VIP address
 	EnableBGP bool `yaml:"enableBGP"`
 
+	// BGPAttachIPToInterface assigns BGP-advertised service VIPs to the configured interface
+	BGPAttachIPToInterface bool `yaml:"bgpAttachIPToInterface"`
+
 	// EnableWireguard, will use wireguard to advertise the VIP address
 	EnableWireguard bool `yaml:"enableWireguard"`
 
@@ -161,6 +164,9 @@ type Config struct {
 
 	// EgressServiceCidr, this contains the service cidr range to ignore
 	EgressServiceCidr string
+
+	// EnableInternalSNAT, this will enable the internal SNAT rule that kube-vip adds to the egress chain
+	EnableInternalSNAT bool
 
 	// EgressWithNftables, this will use the iptables-nftables OVER iptables
 	EgressWithNftables bool

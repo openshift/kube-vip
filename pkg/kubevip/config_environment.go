@@ -456,6 +456,15 @@ func ParseEnvironment(c *Config) error {
 		c.EnableBGP = b
 	}
 
+	env = os.Getenv(bgpAttachIPToInterface)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.BGPAttachIPToInterface = b
+	}
+
 	// BGP Router interface determines an interface that we can use to find an address for
 	env = os.Getenv(bgpRouterInterface)
 	if env != "" {
@@ -717,6 +726,16 @@ func ParseEnvironment(c *Config) error {
 		c.PerServiceElectionOnDemand = b
 	}
 
+	// if this is set then we're enabling the internal SNAT rule that kube-vip adds to the egress chain
+	env = os.Getenv(egressEnableInternalSNAT)
+	if env != "" {
+		b, err := strconv.ParseBool(env)
+		if err != nil {
+			return err
+		}
+		c.EnableInternalSNAT = b
+	}
+
 	// check to see if we're using a specific path to the Kubernetes config file
 	env = os.Getenv(k8sConfigFile)
 	if env != "" {
@@ -886,6 +905,9 @@ func mergeConfigValues(baseConfig, fileConfig *Config) {
 	}
 	if !baseConfig.EnableBGP && fileConfig.EnableBGP {
 		baseConfig.EnableBGP = fileConfig.EnableBGP
+	}
+	if !baseConfig.BGPAttachIPToInterface && fileConfig.BGPAttachIPToInterface {
+		baseConfig.BGPAttachIPToInterface = fileConfig.BGPAttachIPToInterface
 	}
 	if !baseConfig.EnableWireguard && fileConfig.EnableWireguard {
 		baseConfig.EnableWireguard = fileConfig.EnableWireguard
