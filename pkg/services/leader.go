@@ -42,6 +42,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 
 	svcLease := p.leaseMgr.Get(id)
 	if svcLease == nil {
+		metrics.ServiceElectionErrorsTotal.WithLabelValues(service.Namespace, service.Name, "no_lease").Inc()
 		return fmt.Errorf("no existing lease found for service %q with UID %q", service.Name, service.UID)
 	}
 
@@ -82,7 +83,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	// healthy and a new election should have started immediately.
 	go func() {
 		<-svcCtx.Ctx.Done()
-		p.leaseMgr.Delete(id, objectName)
+		p.leaseMgr.Delete(id, objectName, svcLease)
 	}()
 
 	select {

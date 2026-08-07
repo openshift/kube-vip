@@ -165,6 +165,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "service_context").Inc()
 		return fmt.Errorf("failed to get service context: %w", err)
 	}
+	svcCtx = p.dropCancelledServiceContext(svc.UID, svcCtx)
 
 	// The modified event should only be triggered if the service has been modified (i.e. moved somewhere else)
 	if event.Type == watch.Modified {
@@ -195,6 +196,12 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 				// in theory this should never fail
 				p.svcMap.Delete(svc.UID)
+				// Drop this service from its lease now, so the replacement context
+				// below is not parented to a lease the pending cleanup is about to
+				// cancel. A lease shared with other services stays alive for them.
+				ns, name := lease.ServiceName(svc)
+				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
+				p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
@@ -337,6 +344,8 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 		log.Warn("(svcs) The load balancer was deleted, cancelling context", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 		svcCtx.Cancel()
 		p.svcMap.Delete(svc.UID)
+		// Drop the per-service election series so a recreated service starts clean.
+		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 		p.updateActiveServicesMetric()
 	}
 
@@ -363,6 +372,28 @@ func (p *Processor) getServiceContext(uid types.UID) (*servicecontext.Context, e
 		return nil, fmt.Errorf("failed to cast service context pointer - UID: %s", uid)
 	}
 	return ctx, nil
+}
+
+// dropCancelledServiceContext discards a service context whose context has already been
+// cancelled, removing it from svcMap and returning nil so that callers create a fresh one.
+//
+// This matters because the in-memory lease and the service context are removed independently.
+// The cleanup goroutine started by StartServicesLeaderElection calls leaseMgr.Delete once
+// svcCtx.Ctx is done, and Manager.Delete drops the lease entirely when its last object goes
+// away. Several paths cancel the service context without also removing it from svcMap - for
+// example the deferred close(stopChan) in watchEndpoint, and the utils.PanicError branch in
+// AddOrModify.
+//
+// If such a cancelled context were reused, AddOrModify would skip its `if svcCtx == nil`
+// branch and therefore never call leaseMgr.Add again, so StartServicesLeaderElection would
+// fail with "no existing lease found" on every subsequent event and the VIP would never be
+// advertised again.
+func (p *Processor) dropCancelledServiceContext(uid types.UID, svcCtx *servicecontext.Context) *servicecontext.Context {
+	if svcCtx == nil || svcCtx.Ctx.Err() == nil {
+		return svcCtx
+	}
+	p.svcMap.Delete(uid)
+	return nil
 }
 
 func serviceChanged(i *instance.Instance, svc *v1.Service) bool {
