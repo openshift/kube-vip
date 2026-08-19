@@ -11,4 +11,5 @@ ENTRYPOINT ["/usr/bin/kube-vip"]
 
 LABEL io.k8s.display-name="kube-vip" \
       io.k8s.description="Kubernetes Control Plane Virtual IP and Load-Balancer" \
-      org.opencontainers.image.authors="Mateusz Kowalski <mko@redhat.com>"
+      org.opencontainers.image.authors="Mateusz Kowalski <mko@redhat.com>" \
+      io.openshift.release.operator=true
