@@ -212,8 +212,8 @@ func (w *wireguardWorker) clear(svcCtx *servicecontext.Context, lastKnownGoodEnd
 		}
 	}
 
-	if svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
+	if svcCtx != nil {
+		svcCtx.CallLeaderCancel()
 	}
 }
 
@@ -240,14 +240,6 @@ func (w *wireguardWorker) getEndpoints(service *v1.Service, id string) ([]string
 func (w *wireguardWorker) removeEgress(service *v1.Service, lastKnownGoodEndpoint *string) {
 	// WireGuard doesn't use egress in the same way as other modes
 	log.Debug("[wireguard] removeEgress called (no-op)", "service", service.Name)
-}
-
-// delete removes all DNAT rules for a service
-func (w *wireguardWorker) delete(ctx context.Context, service *v1.Service, id string) error {
-	log.Info("[wireguard] deleting DNAT rules for service", "service", service.Name, "namespace", service.Namespace)
-
-	w.clear(nil, nil, service)
-	return nil
 }
 
 // setInstanceEndpointsStatus updates the endpoint status on the service instance

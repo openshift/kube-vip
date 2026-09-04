@@ -46,20 +46,24 @@ func NewEndpointProcessor(config *kubevip.Config, provider providers.Provider, b
 	}
 }
 
-func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Event,
+// Reconcile applies a watch event to the provider and reconciles the service
+// against the endpoints that remain afterwards. A deleted object is only one of
+// potentially several backing the service, so deletions are recomputed rather
+// than assumed to empty it. It reports whether the caller should skip this event
+// and wait for the next one.
+func (p *Processor) Reconcile(svcCtx *servicecontext.Context, event watch.Event,
 	lastKnownGoodEndpoint *string, service *v1.Service, id string,
 	serviceFunc func(*servicecontext.Context, *v1.Service, *sync.WaitGroup, bool) error, wg *sync.WaitGroup,
 	clientSet *kubernetes.Clientset,
 	egressUpdateFunc func(context.Context, *v1.Service) error) (bool, error) {
 
-	var err error
-	if err = p.provider.LoadObject(event.Object, svcCtx.Cancel); err != nil {
-		return false, fmt.Errorf("[%s] error loading k8s object: %w", p.provider.GetLabel(), err)
+	if err := p.applyEvent(svcCtx, event); err != nil {
+		return false, err
 	}
 
 	endpoints, err := p.worker.getEndpoints(service, id)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("[%s] error getting endpoints: %w", p.provider.GetLabel(), err)
 	}
 
 	if err := p.worker.setInstanceEndpointsStatus(svcCtx.Ctx, service, endpoints); err != nil {
@@ -89,11 +93,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 
 		svcCtx.SignalReadiness()
 
-		// There are local endpoints available on the node
-		// Process immediately if:
-		// - No services/leader election is enabled, OR
-		// - WireGuard is enabled (it always needs immediate DNAT rule updates)
-		if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
+		if p.shouldProcessInstance() {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
@@ -106,21 +106,13 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 			}
 			svcCtx.SignalReadiness()
 
-			if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
+			if p.shouldProcessInstance() {
 				if err := p.worker.processInstance(svcCtx, service); err != nil {
 					return false, fmt.Errorf("failed to process endpointless instance: %w", err)
 				}
 			}
 		} else if svcCtx.Signalled.Load() {
-			// There are no local endpoints
-			svcCtx.ResetReadiness()
-			p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
-			if p.config.EnableARP && !p.config.EnableServicesElection {
-				i := instance.FindServiceInstance(service, *p.instances)
-				for _, c := range i.Clusters {
-					c.Stop()
-				}
-			}
+			p.handleNoEndpoints(svcCtx, service, lastKnownGoodEndpoint)
 		}
 	}
 
@@ -133,11 +125,40 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 	return false, nil
 }
 
-func (p *Processor) Delete(ctx context.Context, service *v1.Service, id string) error {
-	if err := p.worker.delete(ctx, service, id); err != nil {
-		return fmt.Errorf("[%s] error deleting service: %w", p.provider.GetLabel(), err)
+// applyEvent updates the provider's view of the objects backing this service.
+func (p *Processor) applyEvent(svcCtx *servicecontext.Context, event watch.Event) error {
+	if event.Type == watch.Deleted {
+		if err := p.provider.DeleteObject(event.Object); err != nil {
+			return fmt.Errorf("[%s] error deleting k8s object: %w", p.provider.GetLabel(), err)
+		}
+		return nil
+	}
+
+	if err := p.provider.LoadObject(event.Object, svcCtx.Cancel); err != nil {
+		return fmt.Errorf("[%s] error loading k8s object: %w", p.provider.GetLabel(), err)
 	}
 	return nil
+}
+
+// shouldProcessInstance reports whether this node has to program the datapath
+// itself, rather than waiting to be told to by a leader election callback.
+// WireGuard always reprograms, because its DNAT rules are per-endpoint.
+func (p *Processor) shouldProcessInstance() bool {
+	return (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard
+}
+
+// handleNoEndpoints tears down everything backing a service that no longer has
+// any usable endpoints.
+func (p *Processor) handleNoEndpoints(svcCtx *servicecontext.Context, service *v1.Service, lastKnownGoodEndpoint *string) {
+	svcCtx.ResetReadiness()
+	p.worker.clear(svcCtx, lastKnownGoodEndpoint, service)
+	if p.config.EnableARP && !p.config.EnableServicesElection && p.instances != nil {
+		if i := instance.FindServiceInstance(service, *p.instances); i != nil {
+			for _, c := range i.Clusters {
+				c.Stop()
+			}
+		}
+	}
 }
 
 func (p *Processor) updateLastKnownGoodEndpoint(lastKnownGoodEndpoint *string, endpoints []string, service *v1.Service) {
@@ -179,28 +200,41 @@ func (p *Processor) updateAnnotations(service *v1.Service, lastKnownGoodEndpoint
 	egressUpdateFunc func(context.Context, *v1.Service) error) {
 	// Set the service accordingly
 	if service.Annotations[kubevip.Egress] == "true" {
-		ip := net.ParseIP(*lastKnownGoodEndpoint)
+		if *lastKnownGoodEndpoint != "" {
+			ip := net.ParseIP(*lastKnownGoodEndpoint)
+			expectIPv6 := service.Annotations[kubevip.EgressIPv6] == "true"
+			if ip == nil || (ip.To4() == nil) != expectIPv6 {
+				log.Warn("ignoring active endpoint with unexpected address family",
+					"service", service.Name,
+					"namespace", service.Namespace,
+					"endpoint", *lastKnownGoodEndpoint,
+					"expected_ipv6", expectIPv6)
+				return
+			}
+		}
 
 		// Store old values from ServiceSnapshot to detect if annotation actually changed
 		// We use the ServiceSnapshot instead of the service parameter because the service parameter
 		// may have stale annotations if the last update failed
 		var oldEndpoint, oldEndpointIPv6 string
+		snapshotFound := false
 		if p.instances != nil {
 			serviceInstance := instance.FindServiceInstance(service, *p.instances)
-			if serviceInstance != nil {
+			if serviceInstance != nil && serviceInstance.ServiceSnapshot != nil {
+				snapshotFound = true
 				oldEndpoint = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpoint]
 				oldEndpointIPv6 = serviceInstance.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
 			}
 		}
-		// Fall back to service annotations if we couldn't find the instance
-		if oldEndpoint == "" && oldEndpointIPv6 == "" {
+		// Empty annotations in an existing snapshot are meaningful after a zero-endpoint transition.
+		if !snapshotFound {
 			oldEndpoint = service.Annotations[kubevip.ActiveEndpoint]
 			oldEndpointIPv6 = service.Annotations[kubevip.ActiveEndpointIPv6]
 		}
 
 		// Determine which annotation to update based on IP version
 		var endpoint, endpointIPv6 string
-		if ip.To4() == nil && !p.config.EnableEndpoints {
+		if service.Annotations[kubevip.EgressIPv6] == "true" && !p.config.EnableEndpoints {
 			// IPv6
 			endpointIPv6 = *lastKnownGoodEndpoint
 			endpoint = oldEndpoint // Preserve existing IPv4 if any
@@ -290,7 +324,12 @@ func (p *Processor) startLeaderElection(svcCtx *servicecontext.Context, service 
 		default:
 			leaseNamespace, serviceLease := lease.ServiceName(service)
 			id := lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease)
+			// The lease is retired once its last service is gone, so an absent one means
+			// this loop has nothing left to elect for.
 			l := p.leaseMgr.Get(id)
+			if l == nil {
+				return
+			}
 			l.Lock()
 
 			if !l.Elected.Load() {

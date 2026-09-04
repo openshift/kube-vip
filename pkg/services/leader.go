@@ -46,6 +46,14 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return fmt.Errorf("no existing lease found for service %q with UID %q", service.Name, service.UID)
 	}
 
+	// A cancelled service context means this call belongs to a torn-down incarnation of
+	// the service. Its replacement is built as Cancel -> Delete -> Add, so the lease
+	// fetched above may already be the replacement's. Registering on it here would let
+	// the cleanup goroutine below retire a lease that is still in use.
+	if err := svcCtx.Ctx.Err(); err != nil {
+		return fmt.Errorf("service context cancelled before election start: %w", err)
+	}
+
 	isNew := svcLease.Add(objectName)
 
 	svcLease.Lock()
@@ -91,7 +99,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		return fmt.Errorf("service context cancelled before election start: %w", svcCtx.Ctx.Err())
 	case <-svcLease.Ctx.Done():
 		return fmt.Errorf("lease context cancelled before election start: %w", svcLease.Ctx.Err())
-	case <-svcCtx.EndpointsReady:
+	case <-svcCtx.GetEndpointsReady():
 	}
 
 	// this service is sharing lease with another service
@@ -114,7 +122,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 		// Block until service context is cancelled
 		<-svcCtx.Ctx.Done()
 
-		if err := p.onStoppedLeading(svcLease, service); err != nil {
+		if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
 			log.Error("error on stopped leading", "error", err)
 		}
 
@@ -127,7 +135,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 	log.Info("new leader election", "service", service.Name, "namespace", service.Namespace, "lock_name", serviceLease, "host_id", p.config.NodeName)
 
 	leaderCtx, leaderCancel := context.WithCancel(svcLease.Ctx)
-	svcCtx.LeaderCancel = leaderCancel
+	svcCtx.SetLeaderCancel(leaderCancel)
 
 	run := election.RunConfig{
 		Config:           p.config,
@@ -151,7 +159,7 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 			// we can do cleanup here
 			svcLease.Elected.Store(false)
 			log.Info("leadership lost", "service", service.Name, "uid", service.UID, "leader", p.config.NodeName)
-			if err := p.onStoppedLeading(svcLease, service); err != nil {
+			if err := p.onStoppedLeading(svcCtx, svcLease, service); err != nil {
 				metrics.ServiceReconcileErrorsTotal.WithLabelValues(service.Namespace, service.Name, "delete_service").Inc()
 				leaderCancel()
 			}
@@ -177,8 +185,6 @@ func (p *Processor) StartServicesLeaderElection(svcCtx *servicecontext.Context, 
 }
 
 func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1.Service, wg *sync.WaitGroup) error {
-	// Mark this service as active (as we've started leading)
-	// we run this in background as it's blocking
 	err := p.SyncServices(svcCtx, service, wg, true)
 	if err != nil {
 		log.Error("service sync", "uid", service.UID, "err", err)
@@ -187,9 +193,18 @@ func (p *Processor) onStartedLeading(svcCtx *servicecontext.Context, service *v1
 	return nil
 }
 
-func (p *Processor) onStoppedLeading(svcLease *lease.Lease, service *v1.Service) error {
+func (p *Processor) onStoppedLeading(svcCtx *servicecontext.Context, svcLease *lease.Lease, service *v1.Service) error {
+	currentSvcCtx, err := p.getServiceContext(service.UID)
+	if err != nil {
+		return err
+	}
+	if currentSvcCtx != nil && currentSvcCtx != svcCtx {
+		log.Debug("skipping cleanup from superseded service context", "service", service.Name, "uid", service.UID)
+		return nil
+	}
+
 	log.Debug("deleting service due to lost leadership", "uid", service.UID)
-	err := p.deleteService(svcLease.Ctx, service.UID)
+	err = p.deleteService(svcLease.Ctx, service.UID)
 	if err != nil {
 		log.Error("service deletion", "err", err)
 		return err

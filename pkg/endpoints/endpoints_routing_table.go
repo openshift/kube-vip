@@ -66,9 +66,7 @@ func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpo
 
 	rt.clearEgress(lastKnownGoodEndpoint, service)
 
-	if svcCtx.LeaderCancel != nil {
-		svcCtx.LeaderCancel()
-	}
+	svcCtx.CallLeaderCancel()
 }
 
 func (rt *RoutingTable) getEndpoints(service *v1.Service, id string) ([]string, error) {
@@ -80,28 +78,6 @@ func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint 
 		service.Namespace, string(service.UID), service.Annotations, rt.config.EgressWithNftables); err != nil {
 		log.Warn("removing redundant egress rules", "err", err)
 	}
-}
-
-func (rt *RoutingTable) delete(_ context.Context, service *v1.Service, id string) error {
-	// When no-leader-elecition mode
-	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
-		// find all existing local endpoints
-		endpoints, err := rt.getEndpoints(service, id)
-		if err != nil {
-			return fmt.Errorf("[%s] error getting endpoints: %w", rt.provider.GetLabel(), err)
-		}
-
-		// If there were local endpoints deleted
-		if len(endpoints) > 0 {
-			rt.deleteAction(service)
-		}
-	}
-
-	return nil
-}
-
-func (rt *RoutingTable) deleteAction(service *v1.Service) {
-	ClearRoutes(service, rt.instances, rt.routeMgr)
 }
 
 func (rt *RoutingTable) setInstanceEndpointsStatus(ctx context.Context, service *v1.Service, endpoints []string) error {
