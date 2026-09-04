@@ -23,7 +23,6 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/endpoints"
-	"github.com/kube-vip/kube-vip/pkg/endpoints/providers"
 	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
@@ -66,7 +65,7 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 			select {
 			case <-ctx.Ctx.Done():
 				return nil
-			case <-ctx.EndpointsReady:
+			case <-ctx.GetEndpointsReady():
 			}
 		}
 
@@ -76,6 +75,15 @@ func (p *Processor) SyncServices(ctx *servicecontext.Context, svc *v1.Service, w
 
 	case ActionNone:
 		log.Debug("[service] no action", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
+		// Egress: when the service reaches ActionNone it means AddCalled is already true.
+		// If ActiveEndpoint is now set (by the endpoint watcher) and the service has a
+		// LB IP, the initial addService call may have missed the SNAT configuration because
+		// ActiveEndpoint was not yet present. Re-run it here.
+		if svc.Annotations[kubevip.Egress] == "true" && svc.Annotations[kubevip.ActiveEndpoint] != "" {
+			if err := p.updateEgressConfiguration(ctx.Ctx, svc); err != nil {
+				log.Warn("[service] egress reconfigure on ActionNone", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+			}
+		}
 	}
 	log.Debug("[FINISHED] Service Sync", "namespace", svc.Namespace, "name", svc.Name, "uid", svc.UID)
 	return nil
@@ -367,17 +375,6 @@ func (p *Processor) configureService(ctx context.Context, inst *instance.Instanc
 					return err
 				}
 			}
-
-			var provider providers.Provider
-			if p.config.EnableEndpoints {
-				provider = providers.NewEndpoints()
-			} else {
-				provider = providers.NewEndpointslices()
-			}
-			err := provider.UpdateServiceAnnotation(ctx, svc.Annotations[kubevip.ActiveEndpoint], svc.Annotations[kubevip.ActiveEndpointIPv6], svc, p.clientSet)
-			if err != nil {
-				log.Warn("[service] configuring egress", "service", svc.Name, "namespace", svc.Namespace, "err", err)
-			}
 		}
 	}
 
@@ -454,7 +451,9 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		endpoints.ClearBGPHostsByInstance(ctx, serviceInstance, p.bgpServer)
 	}
 
-	if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
+	// ClearRoutesByInstance is reference-counted per route, so calling it here is safe
+	// even when the no-election path in Processor.Delete already cleared it.
+	if p.config.EnableRoutingTable {
 		if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances, p.routeMgr); len(errs) > 0 {
 			for _, err := range errs {
 				log.Error("unable to clear routes", "err", err)
@@ -546,9 +545,22 @@ func (p *Processor) updateEgressConfiguration(ctx context.Context, svc *v1.Servi
 	oldIPv6 := i.ServiceSnapshot.Annotations[kubevip.ActiveEndpointIPv6]
 	newIPv6 := svc.Annotations[kubevip.ActiveEndpointIPv6]
 
-	// Skip update if endpoints haven't changed
+	// Skip update if endpoints haven't changed, without touching the API.
 	if oldIPv4 == newIPv4 && oldIPv6 == newIPv6 {
 		return nil
+	}
+
+	// The svc snapshot may have been captured before the LB IP was assigned.
+	// Refresh from the API so FetchServiceAddresses sees the current ingress.
+	if current, err := p.clientSet.CoreV1().Services(svc.Namespace).Get(ctx, svc.Name, metav1.GetOptions{}); err == nil {
+		// Preserve the caller-supplied annotations (ActiveEndpoint etc.) that triggered this call.
+		for k, v := range svc.Annotations {
+			if current.Annotations == nil {
+				current.Annotations = make(map[string]string)
+			}
+			current.Annotations[k] = v
+		}
+		svc = current
 	}
 
 	log.Info("[service] updating egress configuration",

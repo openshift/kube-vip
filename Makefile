@@ -16,15 +16,12 @@ TARGETOS=linux
 LDFLAGS=-ldflags "-s -w -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -extldflags -static"
 DOCKERTAG ?= $(VERSION)
 REPOSITORY ?= docker.io/plndr
-GO_VERSION := 1.25.6
+GO_VERSION := 1.26.6
 K8S_VERSION ?= v1.35.0
-
-# Module mode for the test targets. Some CI builder images (e.g. the OpenShift
-# ART golang builder) export GOFLAGS=-mod=vendor, which breaks `go test` in this
-# non-vendored repository. Override it on the test recipes so the tests resolve
-# modules from the cache instead of a non-existent vendor/ directory.
-# Use override so an inherited GOFLAGS from the environment cannot win.
-override TEST_GOFLAGS := -mod=mod
+GINKGO_ARGS ?=
+GINKGO_PROCS ?=
+GINKGO_PARALLEL := $(if $(GINKGO_PROCS),--procs=$(GINKGO_PROCS),-p)
+BUILDX_CACHE_FLAGS ?=
 
 .PHONY: all build clean install uninstall simplify check run e2e-tests unit-tests integration-tests unit-tests-docker integration-tests-docker
 
@@ -84,17 +81,17 @@ docker:
 # This will build a local docker image (x86 only), use make dockerLocal for all architectures
 dockerx86Local:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) .
+	@docker buildx build --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):$(DOCKERTAG) $(BUILDX_CACHE_FLAGS) .
 	@echo New Multi Architecture Docker image created
 
 dockerx86Action:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):action .
+	@docker buildx build --platform linux/amd64 --load -t $(REPOSITORY)/$(TARGET):action $(BUILDX_CACHE_FLAGS) .
 	@echo New Multi Architecture Docker image created
 
 dockerx86ActionIPTables:
 	@-rm ./kube-vip
-	@docker buildx build  --platform linux/amd64 -f ./Dockerfile_iptables --load -t $(REPOSITORY)/$(TARGET):action .
+	@docker buildx build --platform linux/amd64 -f ./Dockerfile_iptables --load -t $(REPOSITORY)/$(TARGET):action $(BUILDX_CACHE_FLAGS) .
 	@echo New Multi Architecture Docker image created
 
 dockerLocal:
@@ -136,22 +133,22 @@ manifest-test:
 	docker run $(REPOSITORY)/$(TARGET):$(DOCKERTAG) manifest daemonset --interface eth0 --vip 192.168.0.1 --image "$(REPOSITORY)/$(TARGET):$(DOCKERTAG)" --bgp --leaderElection --controlplane --services --inCluster
 
 unit-tests:
-	GOFLAGS="$(TEST_GOFLAGS)" go test -race ./...
+	go test -race ./...
 
 unit-tests-docker:
-	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) make unit-tests
+	docker run --rm -w /kube-vip -v $$(pwd):/kube-vip -v kube-vip-gomod-cache:/go/pkg/mod -v kube-vip-gobuild-cache:/root/.cache/go-build golang:$(GO_VERSION) sh -c "make unit-tests; status=$$?; chmod 666 coverage.out 2>/dev/null || true; exit $$status"
 
 integration-tests:
-	GOFLAGS="$(TEST_GOFLAGS)" go test -tags=integration,e2e -v ./pkg/etcd
+	go test -tags=integration,e2e -v ./pkg/etcd
 
 e2e-tests-arp: get-whoami
-	GOMAXPROCS=4 TEST_MODE=arp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+	GOMAXPROCS=4 TEST_MODE=arp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
 
 e2e-tests-rt: get-whoami
-	GOMAXPROCS=4 TEST_MODE=rt K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+	GOMAXPROCS=4 TEST_MODE=rt K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
 
 e2e-tests-bgp: get-whoami get-gobgp
-	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v -p ./testing/e2e
+	GOMAXPROCS=4 TEST_MODE=bgp K8S_IMAGE_PATH=kindest/node:$(K8S_VERSION) E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -v $(GINKGO_PARALLEL) $(GINKGO_ARGS) ./testing/e2e
 
 e2e-tests: e2e-tests-arp e2e-tests-rt e2e-tests-bgp
 

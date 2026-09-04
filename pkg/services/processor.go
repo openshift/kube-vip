@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	log "log/slog"
 	"reflect"
@@ -91,7 +90,8 @@ func NewServicesProcessor(config *kubevip.Config, bgpServer *bgp.Server,
 	}
 }
 
-func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool, wg *sync.WaitGroup) error {
+func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceFunc *Callback, forcedOnly bool,
+	wg *sync.WaitGroup, cancelWatcher context.CancelCauseFunc) error {
 	svc, ok := event.Object.(*v1.Service)
 	if !ok {
 		return fmt.Errorf("unable to parse Kubernetes services from API watcher")
@@ -105,9 +105,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 		return nil
 	}
 
-	// We only care about LoadBalancer services
+	// A tracked LoadBalancer must be torn down when its type changes.
 	if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-		return nil
+		return p.deleteTrackedService(svc)
 	}
 
 	// Check if we ignore this service
@@ -142,16 +142,6 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	}
 
 	svcInstance := instance.FindServiceInstance(svc, p.ServiceInstances)
-	var err error
-	if svcInstance == nil {
-		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
-		if err != nil {
-			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
-			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
-		}
-		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
-		p.updateActiveServicesMetric()
-	}
 
 	_, usesCommonLease := svc.Annotations[kubevip.ServiceLease]
 	if usesCommonLease && svc.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeCluster {
@@ -194,17 +184,16 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "delete_service").Inc()
 					log.Error("(svc) unable to remove", "service", svc.UID)
 				}
-				// in theory this should never fail
-				p.svcMap.Delete(svc.UID)
-				// Drop this service from its lease now, so the replacement context
-				// below is not parented to a lease the pending cleanup is about to
-				// cancel. A lease shared with other services stays alive for them.
+				// Retire the lease before the replacement context is built, so Add below
+				// cannot hand back an instance the pending cleanup is about to cancel.
+				// A lease shared with other services keeps their references and survives.
 				ns, name := lease.ServiceName(svc)
 				leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
 				p.leaseMgr.Delete(leaseID, lease.ServiceNamespacedName(svc), nil)
 				// Reset the the svcCtx when it was garbage collected
 				// As the next function will create a new context when nil
 				svcCtx = nil
+				svcInstance = nil
 				p.updateActiveServicesMetric()
 			}
 		}
@@ -216,19 +205,31 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 	if svcCtx == nil {
 		ns, name := lease.ServiceName(svc)
 		leaseID := lease.NewID(p.config.LeaderElectionType, ns, name)
-		lease := p.leaseMgr.Add(ctx, leaseID)
-		svcCtx = servicecontext.New(lease.Ctx)
+		p.leaseMgr.Add(ctx, leaseID)
+		// The service context is parented to the watcher, not to the lease: losing a
+		// lease must not tear the service down, it has to let the election restart.
+		svcCtx = servicecontext.New(ctx)
 		p.svcMap.Store(svc.UID, svcCtx)
 	}
 
+	if svcInstance == nil {
+		svcInstance, err = instance.NewInstance(ctx, svc, p.config, p.intfMgr, p.arpMgr, p.routeMgr, p.nodeLabelManager, wg)
+		if err != nil {
+			metrics.ServiceReconcileErrorsTotal.WithLabelValues(svc.Namespace, svc.Name, "new_instance").Inc()
+			return fmt.Errorf("unable to create instance for service %s/%s", svc.Namespace, svc.Name)
+		}
+		p.ServiceInstances = append(p.ServiceInstances, svcInstance)
+		p.updateActiveServicesMetric()
+	}
+
 	// this goroutine starts service handling function (with or without leaderelection)
-	if !svcCtx.IsWatched {
+	if !svcCtx.IsWatchedLocked() {
 		wg.Go(func() {
 			watchWg := sync.WaitGroup{}
 			defer func() {
 				// wait for the sub-goroutines and tag service as not watched
 				watchWg.Wait()
-				svcCtx.IsWatched = false
+				svcCtx.SetWatched(false)
 			}()
 
 			watchWg.Go(func() {
@@ -238,7 +239,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				err = serviceFunc.Run(svcCtx, svc, wg)
 				if err != nil {
 					log.Error(err.Error())
-					if errors.Is(err, &utils.PanicError{}) {
+					if utils.IsPanicError(err) {
 						// cancel service context on panic error
 						// TODO:  should we quit kube-vip altogether here?
 						svcCtx.Cancel()
@@ -256,15 +257,18 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				} else {
 					provider = providers.NewEndpointslices()
 				}
-				if err = p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider); err != nil {
-					log.Error(err.Error())
+				if err := p.watchEndpoint(svcCtx, p.config.NodeName, svc, provider, cancelWatcher); err != nil {
+					log.Error("endpoint watcher failed", "service", svc.Name, "namespace", svc.Namespace, "err", err)
+					if utils.IsPanicError(err) {
+						cancelWatcher(err)
+					}
 				}
 			})
 
 		})
 
 		// tag service as watched
-		svcCtx.IsWatched = true
+		svcCtx.SetWatched(true)
 	}
 
 	if !p.config.EnableServicesElection {
@@ -307,23 +311,16 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 		return nil
 	}
 
+	return p.deleteTrackedService(svc)
+}
+
+func (p *Processor) deleteTrackedService(svc *v1.Service) error {
 	svcCtx, err := p.getServiceContext(svc.UID)
 	if err != nil {
 		return fmt.Errorf("(svcs) unable to get context: %w", err)
 	}
 
 	if svcCtx != nil {
-		// We only care about LoadBalancer services
-		if svc.Spec.Type != v1.ServiceTypeLoadBalancer {
-			return nil
-		}
-
-		// We can ignore this service
-		if svc.Annotations[kubevip.LoadbalancerIgnore] == "true" {
-			log.Info("(svcs) ignore annotation for kube-vip", "service name", svc.Name)
-			return nil
-		}
-
 		// If no leader election is enabled, delete routes here
 		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
 			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
@@ -347,14 +344,17 @@ func (p *Processor) Delete(event watch.Event, forcedOnly bool) error {
 		// Drop the per-service election series so a recreated service starts clean.
 		metrics.ServiceElectionLoops.DeleteLabelValues(svc.Namespace, svc.Name)
 		p.updateActiveServicesMetric()
-	}
 
-	log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
+		log.Info("(svcs) deleted", "service name", svc.Name, "namespace", svc.Namespace)
+	}
 
 	return nil
 }
 
 func (p *Processor) Stop() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	for _, instance := range p.ServiceInstances {
 		for _, cluster := range instance.Clusters {
 			cluster.Stop()

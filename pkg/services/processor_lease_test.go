@@ -4,13 +4,69 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kube-vip/kube-vip/pkg/instance"
 	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 )
+
+func TestAddOrModifyStopsTrackedServiceWhenTypeChanges(t *testing.T) {
+	for _, ignored := range []bool{false, true} {
+		name := "normal"
+		if ignored {
+			name = "ignored"
+		}
+		t.Run(name, func(t *testing.T) {
+			annotations := map[string]string{}
+			if ignored {
+				annotations[kubevip.LoadbalancerIgnore] = "true"
+			}
+
+			uid := types.UID("service-uid")
+			tracked := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "example",
+					Namespace:   "default",
+					UID:         uid,
+					Annotations: map[string]string{},
+				},
+				Spec: v1.ServiceSpec{
+					Type:           v1.ServiceTypeLoadBalancer,
+					LoadBalancerIP: "192.0.2.10",
+				},
+			}
+			modified := tracked.DeepCopy()
+			modified.Spec.Type = v1.ServiceTypeClusterIP
+			modified.Annotations = annotations
+
+			p := &Processor{
+				config:           &kubevip.Config{},
+				leaseMgr:         lease.NewManager(),
+				ServiceInstances: []*instance.Instance{{ServiceSnapshot: tracked}},
+			}
+			svcCtx := servicecontext.New(context.Background())
+			p.svcMap.Store(uid, svcCtx)
+
+			if err := p.AddOrModify(context.Background(), watch.Event{Type: watch.Modified, Object: modified}, nil, false, nil, nil); err != nil {
+				t.Fatalf("AddOrModify returned error: %v", err)
+			}
+
+			if svcCtx.Ctx.Err() == nil {
+				t.Fatal("tracked service context was not cancelled")
+			}
+			if _, ok := p.svcMap.Load(uid); ok {
+				t.Fatal("tracked service context was not removed from svcMap")
+			}
+			if len(p.ServiceInstances) != 0 {
+				t.Fatalf("tracked service instance count = %d, want 0", len(p.ServiceInstances))
+			}
+		})
+	}
+}
 
 // TestDropCancelledServiceContext is a regression test for the lease/svcMap desync that
 // permanently stops a LoadBalancer VIP from being advertised.
@@ -115,5 +171,39 @@ func TestDropCancelledServiceContextAllowsLeaseRecreation(t *testing.T) {
 
 	if p.leaseMgr.Get(id) == nil {
 		t.Fatal("expected a new lease to be created once the cancelled service context was dropped")
+	}
+}
+
+func TestOnStoppedLeadingDoesNotDeleteReplacementContext(t *testing.T) {
+	p := &Processor{
+		config:   &kubevip.Config{},
+		leaseMgr: lease.NewManager(),
+	}
+
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "example",
+			Namespace: "default",
+			UID:       types.UID("service-uid"),
+		},
+	}
+
+	oldCtx := servicecontext.New(context.Background())
+	replacementCtx := servicecontext.New(context.Background())
+	p.svcMap.Store(service.UID, replacementCtx)
+	replacementInstance := &instance.Instance{ServiceSnapshot: service.DeepCopy()}
+	p.ServiceInstances = []*instance.Instance{replacementInstance}
+
+	leaseNamespace, serviceLease := lease.ServiceName(service)
+	svcLease := p.leaseMgr.Add(context.Background(), lease.NewID(p.config.LeaderElectionType, leaseNamespace, serviceLease))
+
+	if err := p.onStoppedLeading(oldCtx, svcLease, service); err != nil {
+		t.Fatalf("onStoppedLeading returned an error: %v", err)
+	}
+	if got, err := p.getServiceContext(service.UID); err != nil || got != replacementCtx {
+		t.Fatalf("replacement context was changed: got %v, err %v", got, err)
+	}
+	if len(p.ServiceInstances) != 1 || p.ServiceInstances[0] != replacementInstance {
+		t.Fatal("replacement service instance was removed by superseded cleanup")
 	}
 }
